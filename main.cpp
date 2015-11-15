@@ -130,14 +130,18 @@ void glfw_key(GLFWwindow* window, int key, int, int action, int) {
       break;
     case GLFW_KEY_F5:
       if (action == GLFW_RELEASE) {
-        app->shader_code = gen_fragshader(app->shader_buffer.data(),
+        std::vector<uint8_t> shader_code = gen_fragshader(app->shader_buffer.data(),
                                           app->shader_buffer.size());
-        bgfx::ShaderHandle fs =
-            bgfx::createShader(bgfx::makeRef(app->shader_code.data(), app->shader_code.size()));
-        bgfx::ProgramHandle np = bgfx::createProgram(app->vs, fs);
-        bgfx::destroyShader(fs);
-        bgfx::destroyProgram(app->program);
-        app->program = np;
+        
+        if (!shader_code.empty()) {
+          app->shader_code = std::move(shader_code);
+          bgfx::ShaderHandle fs =
+              bgfx::createShader(bgfx::makeRef(app->shader_code.data(), app->shader_code.size()));
+          bgfx::ProgramHandle np = bgfx::createProgram(app->vs, fs);
+          bgfx::destroyShader(fs);
+          bgfx::destroyProgram(app->program);
+          app->program = np;
+        }
       }
       break;
     default:
@@ -202,6 +206,7 @@ int main(int argc, char** argv) {
 
   bgfx::glfwSetWindow(window);
   bgfx::init(bgfx::RendererType::OpenGL, BGFX_PCI_ID_NONE, 0, &cb);
+  bgfx::setDebug(BGFX_DEBUG_TEXT);
   bgfx::reset(app.win_width, app.win_height, BGFX_RESET_VSYNC);
 
   pos_vertex::init();
@@ -295,6 +300,9 @@ int main(int argc, char** argv) {
     bgfx::setVertexBuffer(vbh);
     bgfx::setIndexBuffer(ibh);
     bgfx::submit(0, app.program);
+
+    bgfx::dbgTextClear();
+    bgfx::dbgTextPrintf(0, 0, 0x04f, "frame: %4.2f ms", dt_ms);
 
     bgfx::frame();
   }

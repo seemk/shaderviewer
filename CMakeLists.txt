@@ -3,9 +3,11 @@ project(shaderviewer)
 
 
 add_subdirectory("third_party/glfw-3.1.1")
+add_subdirectory("third_party/glsl_optimizer")
 
 include_directories(
   "third_party/glfw-3.1.1/include"
+  "third_party/glsl_optimizer/src"
   "third_party/bx/include"
   "third_party/bgfx/include"
   "stb"
@@ -49,6 +51,7 @@ add_executable(stn
 target_link_libraries(
   stn
   bgfx
+  glsl_optimizer
   glfw
   ${GLFW_LIBRARIES}
 )
