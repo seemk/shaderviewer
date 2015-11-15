@@ -40,6 +40,8 @@ endif()
 add_executable(stn
   main.cpp
   shaders.h
+  shadergen.h
+  shadergen.cpp
   ${NANOVG_SOURCES}
   ${IMGUI_SOURCES}
 )

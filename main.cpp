@@ -5,6 +5,10 @@
 #include "imgui/imgui.h"
 #include "shaders.h"
 #include <bx/timer.h>
+#include <bx/debug.h>
+#include <bx/string.h>
+#include "shadergen.h"
+#include <vector>
 
 GLFWwindow* GLOBAL_WINDOW = nullptr;
 
@@ -35,20 +39,81 @@ struct mouse_state {
 };
 
 struct stn_app {
+  stn_app() : shader_buffer(shader_buf_size, 0) {}
+
   mouse_state mouse;
   int win_width = 1400;
   int win_height = 800;
 
-  bgfx::ShaderHandle fs;
   bgfx::ShaderHandle vs;
   bgfx::ProgramHandle program;
 
   bgfx::UniformHandle u_resolution;
   bgfx::UniformHandle u_time;
   bgfx::UniformHandle u_mouse;
+
+  const size_t shader_buf_size = 512;
+  std::vector<char> shader_buffer;
+
+  std::vector<uint8_t> shader_code;
+};
+
+struct bgfxCallback : public bgfx::CallbackI {
+  virtual ~bgfxCallback() {}
+
+  virtual void traceVargs(const char* _filePath, uint16_t _line,
+                          const char* _format, va_list _argList) override {
+    char temp[2048];
+    char* out = temp;
+    int32_t len =
+        bx::snprintf(out, sizeof(temp), "%s (%d): ", _filePath, _line);
+    int32_t total =
+        len + bx::vsnprintf(out + len, sizeof(temp) - len, _format, _argList);
+    if ((int32_t)sizeof(temp) < total) {
+      out = (char*)alloca(total + 1);
+      memcpy(out, temp, len);
+      bx::vsnprintf(out + len, total - len, _format, _argList);
+    }
+    out[total] = '\0';
+    bx::debugOutput(out);
+  }
+
+  virtual void fatal(bgfx::Fatal::Enum _code, const char* _str) override {
+    if (bgfx::Fatal::DebugCheck == _code) {
+      bx::debugBreak();
+    } else if (bgfx::Fatal::InvalidShader == _code) {
+      printf("invalid shader\n");
+      printf("%s\n", _str);
+    } else {
+      BX_TRACE("0x%08x: %s", _code, _str);
+      BX_UNUSED(_code, _str);
+      abort();
+    }
+  }
+
+  virtual uint32_t cacheReadSize(uint64_t) override { return 0; }
+
+  virtual bool cacheRead(uint64_t, void*, uint32_t) override { return false; }
+
+  virtual void cacheWrite(uint64_t, const void*, uint32_t) override {}
+
+  virtual void screenShot(const char* _filePath, uint32_t _width,
+                          uint32_t _height, uint32_t _pitch, const void* _data,
+                          uint32_t _size, bool _yflip) override {
+    BX_UNUSED(_filePath, _width, _height, _pitch, _data, _size, _yflip);
+  }
+
+  virtual void captureBegin(uint32_t, uint32_t, uint32_t,
+                            bgfx::TextureFormat::Enum, bool) override {}
+
+  virtual void captureEnd() override {}
+
+  virtual void captureFrame(const void*, uint32_t) override {}
 };
 
 void glfw_key(GLFWwindow* window, int key, int, int action, int) {
+  stn_app* app = (stn_app*)glfwGetWindowUserPointer(window);
+
   ImGuiIO& io = ImGui::GetIO();
   if (action == GLFW_PRESS) io.KeysDown[key] = true;
   if (action == GLFW_RELEASE) io.KeysDown[key] = false;
@@ -62,6 +127,22 @@ void glfw_key(GLFWwindow* window, int key, int, int action, int) {
   switch (key) {
     case GLFW_KEY_ESCAPE:
       if (action == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
+      break;
+    case GLFW_KEY_F5:
+      if (action == GLFW_RELEASE) {
+        app->shader_code = gen_fragshader(app->shader_buffer.data(),
+                                          app->shader_buffer.size());
+#if 1
+        bgfx::ShaderHandle fs =
+            bgfx::createShader(bgfx::makeRef(app->shader_code.data(), app->shader_code.size()));
+#else
+        bgfx::ShaderHandle fs = bgfx::createShader(bgfx::makeRef(testfs2, sizeof(testfs2)));
+#endif
+        bgfx::ProgramHandle np = bgfx::createProgram(app->vs, fs);
+        bgfx::destroyShader(fs);
+        bgfx::destroyProgram(app->program);
+        app->program = np;
+      }
       break;
     default:
       break;
@@ -103,9 +184,7 @@ void glfw_mousebtn(GLFWwindow* window, int button, int action, int) {
   }
 }
 
-int imgui_textedit_callback(ImGuiTextEditCallbackData* data) { 
-  return 0;
-}
+int imgui_textedit_callback(ImGuiTextEditCallbackData* data) { return 0; }
 
 int main(int argc, char** argv) {
   glfwSetErrorCallback(glfw_error);
@@ -123,33 +202,36 @@ int main(int argc, char** argv) {
   glfwSetCursorPosCallback(window, glfw_mousemove);
   glfwSetMouseButtonCallback(window, glfw_mousebtn);
 
+  bgfxCallback cb;
+
   bgfx::glfwSetWindow(window);
-  bgfx::init(bgfx::RendererType::OpenGL);
+  bgfx::init(bgfx::RendererType::OpenGL, BGFX_PCI_ID_NONE, 0, &cb);
   bgfx::reset(app.win_width, app.win_height, BGFX_RESET_VSYNC);
 
   pos_vertex::init();
 
   app.u_time = bgfx::createUniform("uGlobalTime", bgfx::UniformType::Vec4);
-  app.u_resolution = bgfx::createUniform("uResolution", bgfx::UniformType::Vec4);
+  app.u_resolution =
+      bgfx::createUniform("uResolution", bgfx::UniformType::Vec4);
+  app.u_mouse = bgfx::createUniform("iMouse", bgfx::UniformType::Vec4);
 
   bgfx::VertexBufferHandle vbh = bgfx::createVertexBuffer(
       bgfx::makeRef(screenQuad, sizeof(screenQuad)), pos_vertex::ms_decl);
   bgfx::IndexBufferHandle ibh =
       bgfx::createIndexBuffer(bgfx::makeRef(quadIndices, sizeof(quadIndices)));
-  
-  app.vs = bgfx::createShader(bgfx::makeRef(vs_screen, sizeof(vs_screen)));
-  app.fs = bgfx::createShader(bgfx::makeRef(testfs2, sizeof(testfs2)));
 
-  app.program = bgfx::createProgram(app.vs, app.fs, true);
+  app.vs = bgfx::createShader(bgfx::makeRef(vs_screen, sizeof(vs_screen)));
+  bgfx::ShaderHandle fs =
+      bgfx::createShader(bgfx::makeRef(testfs3, sizeof(testfs3)));
+
+  app.program = bgfx::createProgram(app.vs, fs);
+  bgfx::destroyShader(fs);
 
   imguiCreate();
 
   bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x6f6f6fff, 1.f,
                      0);
 
-  const size_t texbuf_size = 8092;
-  char texbuf[texbuf_size];
-  memset(texbuf, 0, texbuf_size);
   ImGuiIO& io = ImGui::GetIO();
   io.KeyMap[ImGuiKey_Tab] = GLFW_KEY_TAB;
   io.KeyMap[ImGuiKey_LeftArrow] = GLFW_KEY_LEFT;
@@ -170,12 +252,12 @@ int main(int argc, char** argv) {
   io.KeyMap[ImGuiKey_X] = GLFW_KEY_X;
   io.KeyMap[ImGuiKey_Y] = GLFW_KEY_Y;
   io.KeyMap[ImGuiKey_Z] = GLFW_KEY_Z;
+
   io.GetClipboardTextFn =
       []() { return glfwGetClipboardString(GLOBAL_WINDOW); };
   io.SetClipboardTextFn =
       [](const char* text) { glfwSetClipboardString(GLOBAL_WINDOW, text); };
 
-  
   int64_t cur_time = bx::getHPCounter();
   int64_t prev_time = cur_time;
   double total_time = 0.0;
@@ -198,19 +280,21 @@ int main(int argc, char** argv) {
     imguiBeginFrame(app.mouse.x, app.mouse.y, app.mouse.button, 0,
                     app.win_width, app.win_height);
 
-    ImGui::InputTextMultiline("", texbuf, texbuf_size,
+    ImGui::InputTextMultiline("", app.shader_buffer.data(),
+                              app.shader_buffer.size(),
                               ImVec2(500, app.win_height));
     imguiEndFrame();
 
-    float mouse_unif[4] = { float(app.mouse.x), float(app.mouse.y), 0.0f, 0.0f };
+    float mouse_unif[4] = {float(app.mouse.x), float(app.mouse.y), 0.0f, 0.0f};
     if (app.mouse.button) {
       mouse_unif[2] = float(app.mouse.x);
       mouse_unif[3] = float(app.mouse.y);
     }
     bgfx::setUniform(app.u_mouse, mouse_unif);
-    const float reso_unif[4] = { float(app.win_width), float(app.win_height), 0.f, 0.f };
+    const float reso_unif[4] = {float(app.win_width), float(app.win_height),
+                                0.f, 0.f};
     bgfx::setUniform(app.u_resolution, reso_unif);
-    const float time_unif[4] = { float(total_time), 0.0f, 0.0f, 0.0f };
+    const float time_unif[4] = {float(total_time), 0.0f, 0.0f, 0.0f};
     bgfx::setUniform(app.u_time, time_unif);
     bgfx::setVertexBuffer(vbh);
     bgfx::setIndexBuffer(ibh);
