@@ -42,8 +42,8 @@ struct stn_app {
   stn_app() : shader_buffer(shader_buf_size, 0) {}
 
   mouse_state mouse;
-  int win_width = 1400;
-  int win_height = 800;
+  int win_width = 500;
+  int win_height = 500;
 
   bgfx::ShaderHandle vs;
   bgfx::ProgramHandle program;
@@ -52,7 +52,7 @@ struct stn_app {
   bgfx::UniformHandle u_time;
   bgfx::UniformHandle u_mouse;
 
-  const size_t shader_buf_size = 512;
+  const size_t shader_buf_size = 100000;
   std::vector<char> shader_buffer;
 
   std::vector<uint8_t> shader_code;
@@ -132,12 +132,8 @@ void glfw_key(GLFWwindow* window, int key, int, int action, int) {
       if (action == GLFW_RELEASE) {
         app->shader_code = gen_fragshader(app->shader_buffer.data(),
                                           app->shader_buffer.size());
-#if 1
         bgfx::ShaderHandle fs =
             bgfx::createShader(bgfx::makeRef(app->shader_code.data(), app->shader_code.size()));
-#else
-        bgfx::ShaderHandle fs = bgfx::createShader(bgfx::makeRef(testfs2, sizeof(testfs2)));
-#endif
         bgfx::ProgramHandle np = bgfx::createProgram(app->vs, fs);
         bgfx::destroyShader(fs);
         bgfx::destroyProgram(app->program);
@@ -222,7 +218,7 @@ int main(int argc, char** argv) {
 
   app.vs = bgfx::createShader(bgfx::makeRef(vs_screen, sizeof(vs_screen)));
   bgfx::ShaderHandle fs =
-      bgfx::createShader(bgfx::makeRef(testfs3, sizeof(testfs3)));
+      bgfx::createShader(bgfx::makeRef(default_fs, sizeof(default_fs)));
 
   app.program = bgfx::createProgram(app.vs, fs);
   bgfx::destroyShader(fs);
