@@ -18,6 +18,8 @@ std::vector<uint8_t> gen_fragshader(const char* code, size_t len) {
     uniform vec4 uResolution;
     uniform vec4 uGlobalTime;
     uniform vec4 iMouse;
+    uniform sampler2D iChannel0;
+    uniform sampler2D iChannel1;
 
     vec3 iResolution;
     float iGlobalTime;
@@ -45,7 +47,7 @@ std::vector<uint8_t> gen_fragshader(const char* code, size_t len) {
   shader.insert(shader.end(), shader_main.begin(), shader_main.end());
   shader.push_back(0x00);
 
-#if 0
+#if 1
   const size_t shader_size = shader.size();
   const uint8_t* size_begin = (const uint8_t*)&shader_size;
   bgfx_shader.insert(bgfx_shader.end(), size_begin, size_begin + sizeof(uint32_t));

@@ -9,8 +9,17 @@
 #include <bx/string.h>
 #include "shadergen.h"
 #include <vector>
+#include <stb/stb_image.c>
 
 GLFWwindow* GLOBAL_WINDOW = nullptr;
+
+union bgfx_ig_texture {
+  ImTextureID ptr;
+  struct {
+    uint16_t flags;
+    bgfx::TextureHandle handle;
+  } bgfx_texture;
+};
 
 static const float screenQuad[] = {1.0f,  1.0f,  -1.0f, 1.0f,
                                    -1.0f, -1.0f, 1.0f,  -1.0f};
@@ -42,8 +51,10 @@ struct stn_app {
   stn_app() : shader_buffer(shader_buf_size, 0) {}
 
   mouse_state mouse;
-  int win_width = 500;
-  int win_height = 500;
+  int win_width = 1000;
+  int win_height = 600;
+
+  std::vector<bgfx::TextureHandle> channel_textures;
 
   bgfx::ShaderHandle vs;
   bgfx::ProgramHandle program;
@@ -51,12 +62,28 @@ struct stn_app {
   bgfx::UniformHandle u_resolution;
   bgfx::UniformHandle u_time;
   bgfx::UniformHandle u_mouse;
+  bgfx::UniformHandle u_ch0;
 
   const size_t shader_buf_size = 100000;
   std::vector<char> shader_buffer;
 
   std::vector<uint8_t> shader_code;
 };
+
+bgfx::TextureHandle load_texture(const char* file) {
+  bgfx::TextureHandle texture;
+  int w, h, n;
+  unsigned char* texture_data = stbi_load(file, &w, &h, &n, 4);
+  if (texture_data) {
+    texture = bgfx::createTexture2D(w, h, 1, bgfx::TextureFormat::RGBA8, 0,
+                                    bgfx::copy(texture_data, w * h * n));
+  }
+
+  return texture;
+};
+
+static const char* const texture_files[] = {"tex00.jpg", "tex15.png",
+                                            "tex16.png"};
 
 struct bgfxCallback : public bgfx::CallbackI {
   virtual ~bgfxCallback() {}
@@ -130,13 +157,13 @@ void glfw_key(GLFWwindow* window, int key, int, int action, int) {
       break;
     case GLFW_KEY_F5:
       if (action == GLFW_RELEASE) {
-        std::vector<uint8_t> shader_code = gen_fragshader(app->shader_buffer.data(),
-                                          app->shader_buffer.size());
-        
+        std::vector<uint8_t> shader_code = gen_fragshader(
+            app->shader_buffer.data(), app->shader_buffer.size());
+
         if (!shader_code.empty()) {
           app->shader_code = std::move(shader_code);
-          bgfx::ShaderHandle fs =
-              bgfx::createShader(bgfx::makeRef(app->shader_code.data(), app->shader_code.size()));
+          bgfx::ShaderHandle fs = bgfx::createShader(
+              bgfx::makeRef(app->shader_code.data(), app->shader_code.size()));
           bgfx::ProgramHandle np = bgfx::createProgram(app->vs, fs);
           bgfx::destroyShader(fs);
           bgfx::destroyProgram(app->program);
@@ -216,6 +243,8 @@ int main(int argc, char** argv) {
       bgfx::createUniform("uResolution", bgfx::UniformType::Vec4);
   app.u_mouse = bgfx::createUniform("iMouse", bgfx::UniformType::Vec4);
 
+  app.u_ch0 = bgfx::createUniform("iChannel0", bgfx::UniformType::Int1);
+
   bgfx::VertexBufferHandle vbh = bgfx::createVertexBuffer(
       bgfx::makeRef(screenQuad, sizeof(screenQuad)), pos_vertex::ms_decl);
   bgfx::IndexBufferHandle ibh =
@@ -227,6 +256,13 @@ int main(int argc, char** argv) {
 
   app.program = bgfx::createProgram(app.vs, fs);
   bgfx::destroyShader(fs);
+
+  for (const char* texture_file : texture_files) {
+    bgfx::TextureHandle texture = load_texture(texture_file);
+    if (bgfx::isValid(texture)) {
+      app.channel_textures.push_back(texture);
+    }
+  };
 
   imguiCreate();
 
@@ -262,6 +298,8 @@ int main(int argc, char** argv) {
   int64_t cur_time = bx::getHPCounter();
   int64_t prev_time = cur_time;
   double total_time = 0.0;
+
+  bool opened = true;
   while (!glfwWindowShouldClose(window)) {
     prev_time = cur_time;
     cur_time = bx::getHPCounter();
@@ -278,13 +316,30 @@ int main(int argc, char** argv) {
 
     bgfx::touch(0);
 
+    ImGuiWindowFlags window_flags = 0;
     imguiBeginFrame(app.mouse.x, app.mouse.y, app.mouse.button, 0,
                     app.win_width, app.win_height);
 
+    ImGui::Begin("options", &opened);
+
+    ImGui::BeginChild("code", ImVec2(500, 500));
     ImGui::InputTextMultiline("", app.shader_buffer.data(),
                               app.shader_buffer.size(),
                               ImVec2(500, app.win_height));
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("textures");
+    for (bgfx::TextureHandle h : app.channel_textures) {
+      bgfx_ig_texture img;
+      img.bgfx_texture = {0, h};
+      ImGui::Image(img.ptr, ImVec2(64, 64));
+    }
+    ImGui::EndChild();
+    ImGui::End();
     imguiEndFrame();
+
+    // TODO: Channels
+    // bgfx::setTexture(0, app.u_ch0, testimg.bgfx_texture.handle);
 
     float mouse_unif[4] = {float(app.mouse.x), float(app.mouse.y), 0.0f, 0.0f};
     if (app.mouse.button) {
