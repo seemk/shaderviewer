@@ -211,6 +211,11 @@ void glfw_mousebtn(GLFWwindow* window, int button, int action, int) {
   }
 }
 
+void glfw_scroll(GLFWwindow* window, double x, double y) {
+  stn_app* app = (stn_app*)glfwGetWindowUserPointer(window);
+  app->mouse.scroll += int32_t(y);
+}
+
 int imgui_textedit_callback(ImGuiTextEditCallbackData* data) { return 0; }
 
 int main(int argc, char** argv) {
@@ -228,6 +233,7 @@ int main(int argc, char** argv) {
   glfwSetWindowSizeCallback(window, glfw_resize);
   glfwSetCursorPosCallback(window, glfw_mousemove);
   glfwSetMouseButtonCallback(window, glfw_mousebtn);
+  glfwSetScrollCallback(window, glfw_scroll);
 
   bgfxCallback cb;
 
@@ -317,7 +323,7 @@ int main(int argc, char** argv) {
     bgfx::touch(0);
 
     ImGuiWindowFlags window_flags = 0;
-    imguiBeginFrame(app.mouse.x, app.mouse.y, app.mouse.button, 0,
+    imguiBeginFrame(app.mouse.x, app.mouse.y, app.mouse.button, app.mouse.scroll,
                     app.win_width, app.win_height);
 
     ImGui::Begin("options", &opened);
