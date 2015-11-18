@@ -47,6 +47,11 @@ struct mouse_state {
   uint8_t button = 0;
 };
 
+struct shader_channel {
+  int texture_id = -1;
+  bgfx::UniformHandle uniform;
+};
+
 struct stn_app {
   stn_app() : shader_buffer(shader_buf_size, 0) {}
 
@@ -54,7 +59,7 @@ struct stn_app {
   int win_width = 1000;
   int win_height = 600;
 
-  std::vector<bgfx::TextureHandle> channel_textures;
+  std::vector<bgfx::TextureHandle> textures;
 
   bgfx::ShaderHandle vs;
   bgfx::ProgramHandle program;
@@ -62,12 +67,13 @@ struct stn_app {
   bgfx::UniformHandle u_resolution;
   bgfx::UniformHandle u_time;
   bgfx::UniformHandle u_mouse;
-  bgfx::UniformHandle u_ch0;
 
   const size_t shader_buf_size = 100000;
   std::vector<char> shader_buffer;
 
   std::vector<uint8_t> shader_code;
+
+  std::vector<shader_channel> channels;
 };
 
 bgfx::TextureHandle load_texture(const char* file) {
@@ -82,8 +88,8 @@ bgfx::TextureHandle load_texture(const char* file) {
   return texture;
 };
 
-static const char* const texture_files[] = {"tex00.jpg", "tex15.png",
-                                            "tex16.png"};
+static const char* const texture_files[] = {"nochan.png", "tex00.jpg",
+                                            "tex15.png", "tex16.png"};
 
 struct bgfxCallback : public bgfx::CallbackI {
   virtual ~bgfxCallback() {}
@@ -249,8 +255,6 @@ int main(int argc, char** argv) {
       bgfx::createUniform("uResolution", bgfx::UniformType::Vec4);
   app.u_mouse = bgfx::createUniform("iMouse", bgfx::UniformType::Vec4);
 
-  app.u_ch0 = bgfx::createUniform("iChannel0", bgfx::UniformType::Int1);
-
   bgfx::VertexBufferHandle vbh = bgfx::createVertexBuffer(
       bgfx::makeRef(screenQuad, sizeof(screenQuad)), pos_vertex::ms_decl);
   bgfx::IndexBufferHandle ibh =
@@ -266,9 +270,17 @@ int main(int argc, char** argv) {
   for (const char* texture_file : texture_files) {
     bgfx::TextureHandle texture = load_texture(texture_file);
     if (bgfx::isValid(texture)) {
-      app.channel_textures.push_back(texture);
+      app.textures.push_back(texture);
     }
   };
+
+  for (int i = 0; i < 4; i++) {
+    shader_channel c;
+    c.texture_id = 0;
+    std::string name = "iChannel" + std::to_string(i);
+    c.uniform = bgfx::createUniform(name.c_str(), bgfx::UniformType::Int1);
+    app.channels.push_back(c);
+  }
 
   imguiCreate();
 
@@ -306,6 +318,7 @@ int main(int argc, char** argv) {
   double total_time = 0.0;
 
   bool opened = true;
+  int selecting_channel = -1;
   while (!glfwWindowShouldClose(window)) {
     prev_time = cur_time;
     cur_time = bx::getHPCounter();
@@ -323,8 +336,8 @@ int main(int argc, char** argv) {
     bgfx::touch(0);
 
     ImGuiWindowFlags window_flags = 0;
-    imguiBeginFrame(app.mouse.x, app.mouse.y, app.mouse.button, app.mouse.scroll,
-                    app.win_width, app.win_height);
+    imguiBeginFrame(app.mouse.x, app.mouse.y, app.mouse.button,
+                    app.mouse.scroll, app.win_width, app.win_height);
 
     ImGui::Begin("options", &opened);
 
@@ -335,17 +348,59 @@ int main(int argc, char** argv) {
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::BeginChild("textures");
-    for (bgfx::TextureHandle h : app.channel_textures) {
+  
+    for (size_t i = 0; i < app.channels.size(); i++) {
+      const shader_channel* chan = &app.channels[i];
       bgfx_ig_texture img;
-      img.bgfx_texture = {0, h};
-      ImGui::Image(img.ptr, ImVec2(64, 64));
+      if (chan->texture_id >= 0) {
+        img.bgfx_texture = {0, app.textures[chan->texture_id]};
+      } else {
+        img.bgfx_texture = {0, {bgfx::invalidHandle}};
+      }
+      ImGui::PushID(i);
+      if (ImGui::ImageButton(img.ptr, ImVec2(148, 96), ImVec2(0, 0),
+                             ImVec2(1, 1), 1, ImVec4(0, 0, 0, 255),
+                             ImVec4(1, 1, 1, 1))) {
+        selecting_channel = int(i);
+      }
+      ImGui::PopID();
     }
+
+    if (selecting_channel > -1) {
+      const char* title = "Select texture";
+      ImGui::OpenPopup(title);
+      if (ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+
+        for (size_t i = 0; i < app.textures.size(); i++) {
+          bgfx_ig_texture img;
+          img.bgfx_texture = {0, app.textures[i]};
+          if (ImGui::ImageButton(img.ptr, ImVec2(148, 96))) {
+            app.channels[selecting_channel].texture_id = i;
+            selecting_channel = -1;
+            ImGui::CloseCurrentPopup();
+          }
+
+          if (i % 3 < 2) {
+            ImGui::SameLine();
+          }
+        }
+
+        ImGui::EndPopup();
+      }
+    }
+
+
     ImGui::EndChild();
     ImGui::End();
     imguiEndFrame();
 
-    // TODO: Channels
-    // bgfx::setTexture(0, app.u_ch0, testimg.bgfx_texture.handle);
+    for (size_t i = 0; i < app.channels.size(); i++) {
+      const shader_channel* ch = &app.channels[i];
+      if (ch->texture_id > 0) {
+        bgfx::TextureHandle texture = app.textures[ch->texture_id];
+        bgfx::setTexture(i, ch->uniform, texture);
+      }
+    }
 
     float mouse_unif[4] = {float(app.mouse.x), float(app.mouse.y), 0.0f, 0.0f};
     if (app.mouse.button) {

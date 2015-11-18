@@ -20,6 +20,8 @@ std::vector<uint8_t> gen_fragshader(const char* code, size_t len) {
     uniform vec4 iMouse;
     uniform sampler2D iChannel0;
     uniform sampler2D iChannel1;
+    uniform sampler2D iChannel2;
+    uniform sampler2D iChannel3;
 
     vec3 iResolution;
     float iGlobalTime;
