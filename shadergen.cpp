@@ -82,8 +82,5 @@ std::vector<uint8_t> gen_fragshader(const char* code, size_t len) {
   glslopt_cleanup(opt_ctx);
 #endif
 
-
-  printf("shader size: %lu\n", bgfx_shader.size());
-
   return bgfx_shader;
 }

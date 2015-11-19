@@ -79,6 +79,16 @@ struct stn_app {
   std::vector<shader_channel> channels;
 };
 
+void stn_set_window_size(stn_app* app, int width, int height) {
+  app->win_width = width;
+  app->win_height = height;
+
+  bgfx::reset(width, height, BGFX_RESET_VSYNC);
+
+  const float reso_unif[4] = {float(width), float(height), 0.f, 0.f};
+  bgfx::setUniform(app->u_resolution, reso_unif);
+}
+
 bgfx::TextureHandle load_texture(const char* file) {
   bgfx::TextureHandle texture;
   int w, h, n;
@@ -196,16 +206,16 @@ void glfw_error(int error, const char* description) {
 
 void glfw_resize(GLFWwindow* window, int width, int height) {
   stn_app* app = (stn_app*)glfwGetWindowUserPointer(window);
-  app->win_width = width;
-  app->win_height = height;
-
-  bgfx::reset(width, height, BGFX_RESET_VSYNC);
+  stn_set_window_size(app, width, height);
 }
 
 void glfw_mousemove(GLFWwindow* window, double x, double y) {
   stn_app* app = (stn_app*)glfwGetWindowUserPointer(window);
   app->mouse.x = int32_t(x);
   app->mouse.y = int32_t(y);
+
+  float mouse_unif[4] = {float(app->mouse.x), float(app->mouse.y), 0.0f, 0.0f};
+  bgfx::setUniform(app->u_mouse, mouse_unif);
 }
 
 void glfw_mousebtn(GLFWwindow* window, int button, int action, int) {
@@ -265,9 +275,10 @@ int main(int argc, char** argv) {
 
   app.vs = bgfx::createShader(bgfx::makeRef(vs_screen, sizeof(vs_screen)));
 
-  std::vector<uint8_t> default_shader = gen_fragshader(default_fs, strlen(default_fs));
-  bgfx::ShaderHandle fs =
-      bgfx::createShader(bgfx::makeRef(default_shader.data(), default_shader.size()));
+  std::vector<uint8_t> default_shader =
+      gen_fragshader(default_fs, strlen(default_fs));
+  bgfx::ShaderHandle fs = bgfx::createShader(
+      bgfx::makeRef(default_shader.data(), default_shader.size()));
 
   app.program = bgfx::createProgram(app.vs, fs);
   bgfx::destroyShader(fs);
@@ -286,6 +297,8 @@ int main(int argc, char** argv) {
     c.uniform = bgfx::createUniform(name.c_str(), bgfx::UniformType::Int1);
     app.channels.push_back(c);
   }
+
+  stn_set_window_size(&app, app.win_width, app.win_height);
 
   imguiCreate();
 
@@ -323,7 +336,7 @@ int main(int argc, char** argv) {
   double total_time = 0.0;
 
   bool opened = true;
-  int selecting_channel = -1;
+  int selected_channel = -1;
   while (!glfwWindowShouldClose(window)) {
     prev_time = cur_time;
     cur_time = bx::getHPCounter();
@@ -353,7 +366,7 @@ int main(int argc, char** argv) {
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::BeginChild("textures", ImVec2(200, 500));
-  
+
     for (size_t i = 0; i < app.channels.size(); i++) {
       const shader_channel* chan = &app.channels[i];
       bgfx_ig_texture img;
@@ -366,22 +379,25 @@ int main(int argc, char** argv) {
       if (ImGui::ImageButton(img.ptr, ImVec2(148, 96), ImVec2(0, 0),
                              ImVec2(1, 1), 1, ImVec4(0, 0, 0, 255),
                              ImVec4(1, 1, 1, 1))) {
-        selecting_channel = int(i);
+        selected_channel = int(i);
       }
       ImGui::PopID();
     }
 
-    if (selecting_channel > -1) {
+    if (selected_channel > -1) {
       const char* title = "Select texture";
       ImGui::OpenPopup(title);
-      if (ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-
+      if (ImGui::BeginPopupModal(title, nullptr,
+                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         for (size_t i = 0; i < app.textures.size(); i++) {
           bgfx_ig_texture img;
           img.bgfx_texture = {0, app.textures[i]};
           if (ImGui::ImageButton(img.ptr, ImVec2(148, 96))) {
-            app.channels[selecting_channel].texture_id = i;
-            selecting_channel = -1;
+            shader_channel* ch = &app.channels[selected_channel];
+            ch->texture_id = i;
+            bgfx::TextureHandle texture = app.textures[i];
+            bgfx::setTexture(i, ch->uniform, texture);
+            selected_channel = -1;
             ImGui::CloseCurrentPopup();
           }
 
@@ -394,28 +410,10 @@ int main(int argc, char** argv) {
       }
     }
 
-
     ImGui::EndChild();
     ImGui::End();
     imguiEndFrame();
 
-    for (size_t i = 0; i < app.channels.size(); i++) {
-      const shader_channel* ch = &app.channels[i];
-      if (ch->texture_id > 0) {
-        bgfx::TextureHandle texture = app.textures[ch->texture_id];
-        bgfx::setTexture(i, ch->uniform, texture);
-      }
-    }
-
-    float mouse_unif[4] = {float(app.mouse.x), float(app.mouse.y), 0.0f, 0.0f};
-    if (app.mouse.button) {
-      mouse_unif[2] = float(app.mouse.x);
-      mouse_unif[3] = float(app.mouse.y);
-    }
-    bgfx::setUniform(app.u_mouse, mouse_unif);
-    const float reso_unif[4] = {float(app.win_width), float(app.win_height),
-                                0.f, 0.f};
-    bgfx::setUniform(app.u_resolution, reso_unif);
     const float time_unif[4] = {float(total_time), 0.0f, 0.0f, 0.0f};
     bgfx::setUniform(app.u_time, time_unif);
     bgfx::setVertexBuffer(vbh);
