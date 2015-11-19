@@ -10,6 +10,7 @@
 #include "shadergen.h"
 #include <vector>
 #include <stb/stb_image.c>
+#include <cstring>
 
 GLFWwindow* GLOBAL_WINDOW = nullptr;
 
@@ -53,7 +54,9 @@ struct shader_channel {
 };
 
 struct stn_app {
-  stn_app() : shader_buffer(shader_buf_size, 0) {}
+  stn_app() : shader_buffer(shader_buf_size, 0) {
+    std::strncpy(shader_buffer.data(), default_fs, shader_buf_size);
+  }
 
   mouse_state mouse;
   int win_width = 1000;
@@ -261,8 +264,10 @@ int main(int argc, char** argv) {
       bgfx::createIndexBuffer(bgfx::makeRef(quadIndices, sizeof(quadIndices)));
 
   app.vs = bgfx::createShader(bgfx::makeRef(vs_screen, sizeof(vs_screen)));
+
+  std::vector<uint8_t> default_shader = gen_fragshader(default_fs, strlen(default_fs));
   bgfx::ShaderHandle fs =
-      bgfx::createShader(bgfx::makeRef(default_fs, sizeof(default_fs)));
+      bgfx::createShader(bgfx::makeRef(default_shader.data(), default_shader.size()));
 
   app.program = bgfx::createProgram(app.vs, fs);
   bgfx::destroyShader(fs);
@@ -347,7 +352,7 @@ int main(int argc, char** argv) {
                               ImVec2(500, app.win_height));
     ImGui::EndChild();
     ImGui::SameLine();
-    ImGui::BeginChild("textures");
+    ImGui::BeginChild("textures", ImVec2(200, 500));
   
     for (size_t i = 0; i < app.channels.size(); i++) {
       const shader_channel* chan = &app.channels[i];
